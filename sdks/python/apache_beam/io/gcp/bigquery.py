@@ -1195,6 +1195,9 @@ class _CustomBigQueryStorageStreamSource(BoundedSource):
       self, read_stream_name: str, use_native_datetime: Optional[bool] = True):
     self.read_stream_name = read_stream_name
     self.use_native_datetime = use_native_datetime
+    self._throttled_secs = Metrics.counter(
+        _CustomBigQueryStorageStreamSource, "cumulativeThrottlingSeconds")
+    self._retry_delay_callback = lambda delay: self._throttled_secs.inc(int(delay))
 
   def display_data(self):
     return {
@@ -1246,7 +1249,7 @@ class _CustomBigQueryStorageStreamSource(BoundedSource):
 
   def read_arrow(self):
     storage_client = bq_storage.BigQueryReadClient()
-    row_iter = iter(storage_client.read_rows(self.read_stream_name).rows())
+    row_iter = iter(storage_client.read_rows(self.read_stream_name, retry_delay_callback=self._retry_delay_callback).rows())
     row = next(row_iter, None)
     # Handling the case where the user might provide very selective filters
     # which can result in read_rows_response being empty.
@@ -1260,7 +1263,7 @@ class _CustomBigQueryStorageStreamSource(BoundedSource):
 
   def read_avro(self):
     storage_client = bq_storage.BigQueryReadClient()
-    read_rows_iterator = iter(storage_client.read_rows(self.read_stream_name))
+    read_rows_iterator = iter(storage_client.read_rows(self.read_stream_name, retry_delay_callback=self._retry_delay_callback))
     # Handling the case where the user might provide very selective filters
     # which can result in read_rows_response being empty.
     first_read_rows_response = next(read_rows_iterator, None)
